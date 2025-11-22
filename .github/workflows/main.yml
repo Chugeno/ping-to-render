@@ -2,13 +2,27 @@ name: keep-alive
 
 on:
   schedule:
-    - cron: "*/14 * * * *"    # CAMBIO CLAVE: Cada 14 minutos
-  workflow_dispatch:          # Te permite probarlo manualmente con un botón
+    - cron: "*/14 * * * *"
+  workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 5        # Seguridad por si se cuelga
+    timeout-minutes: 5
     steps:
+      # Paso 1: Intentar despertar a Render
       - name: Wake Render (GET)
-        run: curl -fsS https://n8n-dnlu.onrender.com/healthz
+        id: wake_step
+        # Quitamos el "|| true" para que si falla, GitHub sepa que falló
+        run: curl -fsS https://google.com/esta-pagina-no-existe
+
+      # Paso 2: Avisar por ntfy SOLO si lo de arriba falló
+      - name: 🚨 Alerta de Error
+        if: failure()  # <--- ESTA ES LA MAGIA
+        run: |
+          curl \
+            -d "⚠️ OJO: El ping a n8n falló. Render podría estar caído o dormido." \
+            -H "Title: Error en n8n Keep-Alive" \
+            -H "Priority: high" \
+            -H "Tags: warning,skull" \
+            ntfy.sh/eugenio-bamzUf-2dijqy-gahtan
