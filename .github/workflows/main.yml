@@ -2,7 +2,7 @@ name: Monitor n8n con Log de Errores
 
 on:
   schedule:
-    - cron: "*/12 * * * *"  # Ajustado a 12 min para compensar retrasos de GitHub
+    - cron: "*/12 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -16,35 +16,45 @@ jobs:
         id: date
         run: echo "timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
 
-      # 2. Ping INTELIGENTE (Captura el error)
+      # 2. Ping LIMPIO (Solo captura el error real)
       - name: Ping n8n Webhook
         id: ping_n8n
         continue-on-error: true 
         run: |
-          # Intentamos el curl y guardamos TODO (éxito o error) en un archivo temporal output.txt
-          # 2>&1 significa: "Manda los errores al mismo lugar que la salida normal"
-          if curl -v --request GET \
-            --url "https://dnlu.onrender.com/webhook/49fea9ce-864f-4d42-968c-7c19fea1029d" \
+          # --silent: No muestra barra de progreso ni basura
+          # --show-error: Si falla, muestra el error (ej: 404 Not Found)
+          # 2> output.txt: Guardamos solo el error en el archivo
+          
+          if curl --request GET \
+            --url "https://n8n-dnlu.onrender.com/webhook/49fea9ce-864f-4d42-968c-7c19fe" \
             --max-time 120 \
             --retry 3 \
-            --fail 2>&1 > output.txt; then
+            --fail \
+            --silent \
+            --show-error 2> output.txt; then
             
             echo "outcome=success" >> $GITHUB_OUTPUT
+            echo "✅ Ping exitoso"
           else
             echo "outcome=failure" >> $GITHUB_OUTPUT
             
-            # LEER EL ERROR:
-            # Tomamos las últimas lineas del log, quitamos comillas dobles y saltos de linea
-            # para que no rompa el formato JSON de Notion.
-            ERROR_CLEAN=$(cat output.txt | tail -n 5 | tr -d '"' | tr '\n' ' ')
-            echo "error_msg=$ERROR_CLEAN" >> $GITHUB_OUTPUT
+            # Leemos el archivo de error
+            ERROR_MSG=$(cat output.txt)
             
-            # Imprimir en consola de GitHub para que lo veas aquí también
+            # Si por alguna razón está vacío, ponemos un texto por defecto
+            if [ -z "$ERROR_MSG" ]; then
+              ERROR_MSG="Error desconocido (Timeout o Conexión)"
+            fi
+
+            # Limpiamos comillas dobles para no romper el JSON de Notion
+            ERROR_CLEAN=$(echo "$ERROR_MSG" | tr -d '"' | tr '\n' ' ')
+            
+            echo "error_msg=$ERROR_CLEAN" >> $GITHUB_OUTPUT
             echo "⚠️ ERROR CAPTURADO: $ERROR_CLEAN"
             exit 1
           fi
 
-      # 3. Log OK (Si ping fue exitoso) - Sin cambios aquí
+      # 3. Log OK (Si ping fue exitoso)
       - name: Log OK to Notion
         if: steps.ping_n8n.outputs.outcome == 'success'
         run: |
