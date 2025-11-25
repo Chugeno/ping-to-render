@@ -23,7 +23,7 @@ jobs:
         continue-on-error: true 
         run: |
           curl --request GET \
-          --url "https://n8n-dnlu.onrender.com/webhook/monitor-ping" \
+          --url "https://n8n-dnlu.onrender.com/webhook/49fea9ce-864f-4d42-968c-7c19fea1029d" \
           --max-time 120 \
           --retry 3 \
           --fail
