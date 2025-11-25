@@ -1,28 +1,75 @@
-name: keep-alive
+name: Monitor n8n con Log Directo a Notion
 
 on:
   schedule:
-    - cron: "*/14 * * * *"
+    - cron: "*/14 * * * *"  # Cada 14 minutos
   workflow_dispatch:
 
 jobs:
-  ping:
+  check-and-log:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    
     steps:
-      # Paso 1: Intentar despertar a Render
-      - name: Wake Render (GET)
-        id: wake_step
-        # Quitamos el "|| true" para que si falla, GitHub sepa que falló
-        run: curl -fsS https://n8n-dnlu.onrender.com/healthz
+      # 1. Obtenemos la fecha actual para el log
+      - name: Get current date
+        id: date
+        run: echo "timestamp=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
-      # Paso 2: Avisar por ntfy SOLO si lo de arriba falló
-      - name: 🚨 Alerta de Error
-        if: failure()  # <--- ESTA ES LA MAGIA
+      # 2. Intentamos despertar a n8n (Tu Webhook o el Healthz)
+      - name: Ping n8n Webhook
+        id: ping_n8n
+        # Ponemos 'continue-on-error' para que si falla, podamos ejecutar el paso de reporte de error
+        continue-on-error: true 
         run: |
-          curl \
-            -d "⚠️ OJO: El ping a n8n falló. Render podría estar caído o dormido." \
-            -H "Title: Error en n8n Keep-Alive" \
-            -H "Priority: high" \
-            -H "Tags: warning,skull" \
-            ntfy.sh/eugenio-bamzUf-2dijqy-gahtan
+          curl --request GET \
+          --url "https://n8n-dnlu.onrender.com/webhook/monitor-ping" \
+          --max-time 120 \
+          --retry 3 \
+          --fail
+
+      # 3. Si el Ping fue EXITOSO (Success) -> Escribimos OK en Notion
+      - name: Log OK to Notion
+        if: steps.ping_n8n.outcome == 'success'
+        run: |
+          curl -X POST 'https://api.notion.com/v1/pages' \
+            -H 'Authorization: Bearer ${{ secrets.NOTION_TOKEN }}' \
+            -H 'Content-Type: application/json' \
+            -H 'Notion-Version: 2022-06-28' \
+            --data '{
+              "parent": { "database_id": "${{ secrets.NOTION_DATABASE_ID }}" },
+              "properties": {
+                "Name": { 
+                  "title": [ { "text": { "content": "Ping GitHub Action" } } ] 
+                },
+                "Estado": { 
+                  "select": { "name": "🟢 OK" } 
+                },
+                "Fecha": { 
+                  "rich_text": [ { "text": { "content": "${{ steps.date.outputs.timestamp }}" } } ]
+                }
+              }
+            }'
+
+      # 4. Si el Ping FALLÓ (Failure) -> Escribimos ERROR en Notion
+      - name: Log ERROR to Notion
+        if: steps.ping_n8n.outcome == 'failure'
+        run: |
+          curl -X POST 'https://api.notion.com/v1/pages' \
+            -H 'Authorization: Bearer ${{ secrets.NOTION_TOKEN }}' \
+            -H 'Content-Type: application/json' \
+            -H 'Notion-Version: 2022-06-28' \
+            --data '{
+              "parent": { "database_id": "${{ secrets.NOTION_DATABASE_ID }}" },
+              "properties": {
+                "Name": { 
+                  "title": [ { "text": { "content": "FALLO DE CONEXIÓN" } } ] 
+                },
+                "Estado": { 
+                  "select": { "name": "🔴 ERROR" } 
+                },
+                "Fecha": { 
+                  "rich_text": [ { "text": { "content": "${{ steps.date.outputs.timestamp }}" } } ]
+                }
+              }
+            }'
