@@ -1,8 +1,8 @@
-name: Monitor n8n con Log Directo a Notion
+name: Monitor n8n con Log de Errores
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/12 * * * *"  # Ajustado a 12 min para compensar retrasos de GitHub
   workflow_dispatch:
 
 jobs:
@@ -11,25 +11,42 @@ jobs:
     timeout-minutes: 5
     
     steps:
-      # 1. Obtenemos la fecha en formato ISO 8601 (El favorito de Notion)
+      # 1. Obtenemos la fecha
       - name: Get current date
         id: date
         run: echo "timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
 
-      # 2. Intentamos despertar a n8n
+      # 2. Ping INTELIGENTE (Captura el error)
       - name: Ping n8n Webhook
         id: ping_n8n
         continue-on-error: true 
         run: |
-          curl --request GET \
-          --url "https://n8n-dnlu.onrender.com/webhook/49fea9ce-864f-4d42-968c-7c19fea1029d" \
-          --max-time 120 \
-          --retry 3 \
-          --fail
+          # Intentamos el curl y guardamos TODO (éxito o error) en un archivo temporal output.txt
+          # 2>&1 significa: "Manda los errores al mismo lugar que la salida normal"
+          if curl -v --request GET \
+            --url "https://n8n-dnlu.onrender.com/webhook/49fea9ce-864f-4d42-968c-7c19fea1029d" \
+            --max-time 120 \
+            --retry 3 \
+            --fail 2>&1 > output.txt; then
+            
+            echo "outcome=success" >> $GITHUB_OUTPUT
+          else
+            echo "outcome=failure" >> $GITHUB_OUTPUT
+            
+            # LEER EL ERROR:
+            # Tomamos las últimas lineas del log, quitamos comillas dobles y saltos de linea
+            # para que no rompa el formato JSON de Notion.
+            ERROR_CLEAN=$(cat output.txt | tail -n 5 | tr -d '"' | tr '\n' ' ')
+            echo "error_msg=$ERROR_CLEAN" >> $GITHUB_OUTPUT
+            
+            # Imprimir en consola de GitHub para que lo veas aquí también
+            echo "⚠️ ERROR CAPTURADO: $ERROR_CLEAN"
+            exit 1
+          fi
 
-      # 3. Log OK (Si ping fue exitoso)
+      # 3. Log OK (Si ping fue exitoso) - Sin cambios aquí
       - name: Log OK to Notion
-        if: steps.ping_n8n.outcome == 'success'
+        if: steps.ping_n8n.outputs.outcome == 'success'
         run: |
           curl -X POST 'https://api.notion.com/v1/pages' \
             -H 'Authorization: Bearer ${{ secrets.NOTION_TOKEN }}' \
@@ -38,21 +55,16 @@ jobs:
             --data '{
               "parent": { "database_id": "${{ secrets.NOTION_DATABASE_ID }}" },
               "properties": {
-                "Nombre": { 
-                  "title": [ { "text": { "content": "Ping GitHub Action" } } ] 
-                },
-                "Estado": { 
-                  "select": { "name": "🟢 OK" } 
-                },
-                "Fecha": { 
-                  "date": { "start": "${{ steps.date.outputs.timestamp }}" } 
-                }
+                "Nombre": { "title": [ { "text": { "content": "Ping GitHub Action" } } ] },
+                "Estado": { "select": { "name": "🟢 OK" } },
+                "Fecha": { "date": { "start": "${{ steps.date.outputs.timestamp }}" } },
+                "Detalle": { "rich_text": [ { "text": { "content": "Respuesta 200 OK" } } ] }
               }
             }'
 
-      # 4. Log ERROR (Si ping falló)
+      # 4. Log ERROR (Con el mensaje capturado)
       - name: Log ERROR to Notion
-        if: steps.ping_n8n.outcome == 'failure'
+        if: steps.ping_n8n.outputs.outcome == 'failure'
         run: |
           curl -X POST 'https://api.notion.com/v1/pages' \
             -H 'Authorization: Bearer ${{ secrets.NOTION_TOKEN }}' \
@@ -61,14 +73,9 @@ jobs:
             --data '{
               "parent": { "database_id": "${{ secrets.NOTION_DATABASE_ID }}" },
               "properties": {
-                "Nombre": { 
-                  "title": [ { "text": { "content": "FALLO DE CONEXIÓN" } } ] 
-                },
-                "Estado": { 
-                  "select": { "name": "🔴 ERROR" } 
-                },
-                "Fecha": { 
-                  "date": { "start": "${{ steps.date.outputs.timestamp }}" } 
-                }
+                "Nombre": { "title": [ { "text": { "content": "FALLO DE CONEXIÓN" } } ] },
+                "Estado": { "select": { "name": "🔴 ERROR" } },
+                "Fecha": { "date": { "start": "${{ steps.date.outputs.timestamp }}" } },
+                "Detalle": { "rich_text": [ { "text": { "content": "${{ steps.ping_n8n.outputs.error_msg }}" } } ] }
               }
             }'
