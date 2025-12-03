@@ -26,7 +26,7 @@ jobs:
           # 2> output.txt: Guardamos solo el error en el archivo
           
           if curl --request GET \
-            --url "https://n8n-dnlu.onrender.com/webhook/49fea9ce-864f-4d42-968c-7c19fea1029d" \
+            --url "https://n8n.eugenioazurmendi.com.ar/webhook/monitor" \
             --max-time 120 \
             --retry 3 \
             --fail \
