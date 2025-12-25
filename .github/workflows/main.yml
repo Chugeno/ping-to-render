@@ -26,7 +26,7 @@ jobs:
           # 2> output.txt: Guardamos solo el error en el archivo
           
           if curl --request GET \
-            --url "https://n8n.eugenioazurmendi.com.ar/webhook/monitor" \
+            --url "https://n8n.eugenioazurmendi.com.ar/healthz" \
             --max-time 120 \
             --retry 3 \
             --fail \
